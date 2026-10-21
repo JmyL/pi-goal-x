@@ -125,6 +125,30 @@ describe("layering matrix", () => {
 		});
 	});
 
+	it("pause keybinding: default escape, layerable, unknown keys rejected", () => {
+		withTempDir((dir) => {
+			const env = { PI_GOAL_GLOBAL_SETTINGS_FILE: path.join(dir, "g.json") };
+			writeJson(path.join(dir, "g.json"), { keybindings: { pause: "ctrl+q" } });
+			writeJson(path.join(dir, ".pi", "pi-goal-x-settings.json"), { keybindings: { pause: "ctrl+alt+p" } });
+			invalidateGoalSettingsCache();
+			const s = loadGoalSettings(dir, env);
+			assert.equal(s.keybindings?.pause, "ctrl+alt+p", "project pause leaf wins");
+
+			writeJson(path.join(dir, ".pi", "pi-goal-x-settings.json"), {});
+			invalidateGoalSettingsCache();
+			assert.equal(loadGoalSettings(dir, env).keybindings?.pause, "ctrl+q", "unset project leaf inherits global");
+
+			writeJson(path.join(dir, "g.json"), {});
+			invalidateGoalSettingsCache();
+			assert.equal(loadGoalSettings(dir, env).keybindings?.pause, "escape", "missing everywhere falls back to default");
+
+			writeJson(path.join(dir, ".pi", "pi-goal-x-settings.json"), { keybindings: { pause: 42 } });
+			invalidateGoalSettingsCache();
+			const snap = loadSettingsSnapshot(dir, env);
+			assert.ok(snap.diagnostics.some((d) => d.settingPath === "keybindings.pause" && d.code === "invalid_value"), "non-string pause rejected");
+		});
+	});
+
 	it("provenance records the source of every leaf", () => {
 		withTempDir((dir) => {
 			const env = { PI_GOAL_GLOBAL_SETTINGS_FILE: path.join(dir, "g.json"), PI_GOAL_DISABLE_CONTRACTS: "false" };

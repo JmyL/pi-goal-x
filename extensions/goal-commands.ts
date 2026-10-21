@@ -12,6 +12,7 @@ import {
 	mutateSettingsLayer,
 	readSettingsLayer,
 	envOverrideFor,
+	formatGoalKeybinding,
 	type GoalSettings,
 	type SettingsMutation,
 	type SettingsScope,
@@ -400,7 +401,7 @@ export function registerGoalCommands(core: GoalCore): void {
 		if (key === "maxAutonomousRuns") return config.maxAutonomousRuns === 0 ? "0 (disabled)" : String(config.maxAutonomousRuns ?? "unlimited (default)");
 		if (key === "stallTimeoutMinutes") return config.stallTimeoutMinutes !== undefined ? String(config.stallTimeoutMinutes) : "0";
 		if (key === "objectiveMaxChars") return config.objectiveMaxChars !== undefined ? String(config.objectiveMaxChars) : "0";
-		if (key === "keybindings") return config.keybindings ? `${config.keybindings.dashboard.toggleExpand}, ${config.keybindings.dashboard.scrollUp}, ${config.keybindings.dashboard.scrollDown}` : "(default)";
+		if (key === "keybindings") return config.keybindings ? `${config.keybindings.dashboard.toggleExpand}, ${config.keybindings.dashboard.scrollUp}, ${config.keybindings.dashboard.scrollDown} · pause: ${formatGoalKeybinding(config.keybindings.pause)}` : "(default)";
 		const value = (config as Record<string, unknown>)[key];
 		return typeof value === "string" ? value : "(default)";
 	}

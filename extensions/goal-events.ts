@@ -16,7 +16,7 @@ import { buildCompactionSummary, buildPostCompactionGoalDelta } from "./goal-com
 import { latestAuditorResultForGoal, readGoalLedger, goalRuntimeEvents, invalidateGoalLedgerCache } from "./goal-ledger.ts";
 import { shouldArmPostCompactReminder, shouldInjectPostCompactReminder } from "./goal-policy.ts";
 import { formatTokenValue } from "./goal-core.ts";
-import { loadGoalSettings, invalidateGoalSettingsCache } from "./goal-settings.ts";
+import { loadGoalSettings, invalidateGoalSettingsCache, DEFAULT_GOAL_KEYBINDINGS } from "./goal-settings.ts";
 import { modelBudgetLine, budgetRemaining } from "./goal-accounting.ts";
 import { asRecord, nowIso, type AssistantMessageLike, type GoalRecord } from "./goal-record.ts";
 import { goalSelectorLabel, otherOpenGoalCount } from "./goal-pool.ts";
@@ -154,6 +154,11 @@ export function registerGoalEvents(core: GoalCore): void {
 		return;
 	});
 
+	/** True when the configured pause key is the default Escape (the only case where the abort cascade owns pausing). */
+	function pauseKeyIsEscape(ctx: ExtensionContext): boolean {
+		return (loadGoalSettings(ctx.cwd).keybindings?.pause ?? DEFAULT_GOAL_KEYBINDINGS.pause) === "escape";
+	}
+
 	pi.on("tool_execution_end", async (_event, ctx) => {
 		core.touchGoalActivity(); // F5
 		core.accountProgress(ctx);
@@ -166,10 +171,13 @@ export function registerGoalEvents(core: GoalCore): void {
 		core.accountProgress(ctx, { completedTurnTokens: tokens });
 
 		if (isAbortedAssistantMessage(message)) {
-			// Pause only on a genuine user abort (signal fired). A provider- or
-			// transport-side abort without the signal routes into recovery via
-			// agent_end instead of stranding the goal.
-			if (ctx.signal?.aborted) core.pauseActiveGoal(ctx);
+			// Pause on a genuine user abort (signal fired) only while Escape is the
+			// pause key — Esc passes through to pi, which aborts the turn, and the
+			// cascade is what flips the goal state. With a custom pause key the
+			// handler in goal-widget.ts pauses and aborts explicitly, so a plain
+			// Esc abort must leave the goal alone (it just stops the current turn;
+			// agent_end routes it into the existing continuation/recovery path).
+			if (ctx.signal?.aborted && pauseKeyIsEscape(ctx)) core.pauseActiveGoal(ctx);
 			return;
 		}
 		// Provider failures are not completed work: do not turn one failed turn
@@ -250,9 +258,10 @@ export function registerGoalEvents(core: GoalCore): void {
 	});
 
 	pi.on("message_end", async (event, ctx) => {
-		// Signal-aware: see turn_end — only user aborts pause; provider-side
-		// aborts are handled by agent_end's recovery path.
-		if (isAbortedAssistantMessage(event.message) && ctx.signal?.aborted) core.pauseActiveGoal(ctx);
+		// Signal-aware: see turn_end — user aborts pause only while Escape is
+		// the pause key; provider-side aborts are handled by agent_end's
+		// recovery path.
+		if (isAbortedAssistantMessage(event.message) && ctx.signal?.aborted && pauseKeyIsEscape(ctx)) core.pauseActiveGoal(ctx);
 		const raw = asRecord(event.message);
 		if (raw?.role === "custom" && raw.customType === GOAL_EVENT_ENTRY && raw.display !== false) {
 			return { message: { ...event.message, display: false } as typeof event.message };
@@ -511,12 +520,15 @@ export function registerGoalEvents(core: GoalCore): void {
 		if (!core.state.goal || core.state.goal.status !== "active" || !core.state.goal.autoContinue) return;
 		if (endedGoalId && core.state.goal.id !== endedGoalId) return;
 		if (!core.reconcileFocusedGoalFromDisk(ctx)) return;
-		// A genuine user abort pauses the goal. An assistant message with
-		// stopReason "aborted" WITHOUT a user abort signal is a provider- or
-		// transport-side termination (e.g. after Pi exhausts its retries) —
-		// pausing there stranded goals during outages, so it routes into the
-		// same bounded recovery as classified transient errors instead.
-		if (ctx.signal?.aborted) {
+		// A genuine user abort pauses the goal — but only while Escape is the
+		// pause key (see turn_end). With a custom pause key the key handler owns
+		// pausing; a plain Esc abort here falls through so an interrupted goal
+		// keeps going. An assistant message with stopReason "aborted" WITHOUT a
+		// user abort signal is a provider- or transport-side termination (e.g.
+		// after Pi exhausts its retries) — routing it into the same bounded
+		// recovery as classified transient errors avoids stranding goals during
+		// outages.
+		if (ctx.signal?.aborted && pauseKeyIsEscape(ctx)) {
 			core.pauseActiveGoal(ctx);
 			return;
 		}

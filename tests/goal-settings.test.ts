@@ -320,12 +320,12 @@ test("saveGoalSettingsFileConfig: task keybindings round-trip", () => {
 			toggleExpand: "ctrl+shift+t",
 			scrollUp: "ctrl+shift+up",
 			scrollDown: "ctrl+shift+down",
-		} } });
+		}, pause: "escape" } });
 		assert.deepEqual(loadGoalSettingsFileConfig(dir).keybindings, { dashboard: {
 			toggleExpand: "ctrl+shift+t",
 			scrollUp: "ctrl+shift+up",
 			scrollDown: "ctrl+shift+down",
-		} });
+		}, pause: "escape" });
 	});
 });
 

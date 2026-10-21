@@ -48,10 +48,13 @@ export interface GoalDashboardKeybindingsLayer {
 
 export interface GoalKeybindings {
 	dashboard: GoalDashboardKeybindings;
+	/** Key that pauses a live goal (default Escape, which also stops the current turn). */
+	pause: KeyId;
 }
 
 export interface GoalKeybindingsLayer {
 	dashboard?: GoalDashboardKeybindingsLayer;
+	pause?: KeyId;
 }
 
 export const DEFAULT_GOAL_KEYBINDINGS: GoalKeybindings = {
@@ -60,6 +63,7 @@ export const DEFAULT_GOAL_KEYBINDINGS: GoalKeybindings = {
 		scrollUp: "ctrl+shift+up",
 		scrollDown: "ctrl+shift+down",
 	},
+	pause: "escape",
 };
 
 /**
@@ -364,7 +368,7 @@ const ALLOWED_ORACLE_KEYS = new Set([
 	"maxFailedAttemptsPerBlocker",
 ]);
 
-const ALLOWED_KEYBINDING_KEYS = new Set(["dashboard"]);
+const ALLOWED_KEYBINDING_KEYS = new Set(["dashboard", "pause"]);
 const ALLOWED_DASHBOARD_KEYBINDING_KEYS = new Set(["toggleExpand", "scrollUp", "scrollDown"]);
 
 /**
@@ -458,6 +462,15 @@ export function parseSettingsLayer(
 				for (const [kbKey, kbValue] of Object.entries(kbRecord)) {
 					if (!ALLOWED_KEYBINDING_KEYS.has(kbKey)) {
 						diagnostics.push(diagnostic("unknown_key", `unknown keybindings key: ${kbKey}`, `keybindings.${kbKey}`));
+						continue;
+					}
+					if (kbKey === "pause") {
+						const bound = asKeybinding(kbValue);
+						if (bound === undefined) {
+							diagnostics.push(diagnostic("invalid_value", "pause must be a non-empty key id", "keybindings.pause"));
+							continue;
+						}
+						sparse.pause = bound;
 						continue;
 					}
 					if (kbKey !== "dashboard") continue;
@@ -859,6 +872,11 @@ function resolvedSettingsSnapshot(cwd: string, env: NodeJS.ProcessEnv): Settings
 		envVar: "PI_GOAL_NETWORK_RECOVERY_MAX_DELAY_MS",
 	}));
 
+	const pauseKeybinding = resolveLeaf<KeyId>({
+		projectValue: project.layer.keybindings?.pause,
+		globalValue: global.layer.keybindings?.pause,
+		defaultValue: DEFAULT_GOAL_KEYBINDINGS.pause,
+	});
 	const keybindings: GoalKeybindings = {
 		dashboard: {
 			toggleExpand: track(pathKey("keybindings", "dashboard", "toggleExpand"), resolveLeaf<KeyId>({
@@ -877,6 +895,7 @@ function resolvedSettingsSnapshot(cwd: string, env: NodeJS.ProcessEnv): Settings
 				defaultValue: DEFAULT_GOAL_KEYBINDINGS.dashboard.scrollDown,
 			})),
 		},
+		pause: track(pathKey("keybindings", "pause"), pauseKeybinding),
 	};
 
 	const value: ResolvedGoalSettings = {
@@ -926,7 +945,7 @@ function resolvedSettingsSnapshot(cwd: string, env: NodeJS.ProcessEnv): Settings
 
 function copyResolvedSettings(value: ResolvedGoalSettings): ResolvedGoalSettings {
 	return {...value,
-		...(value.keybindings ? {keybindings: {dashboard: {...value.keybindings.dashboard}}} : {}),
+		...(value.keybindings ? {keybindings: {dashboard: {...value.keybindings.dashboard}, pause: value.keybindings.pause}} : {}),
 		...(value.networkRecovery ? {networkRecovery: {...value.networkRecovery}} : {}),
 		...(value.oracle ? {oracle: {...value.oracle}} : {}),
 	};
@@ -1253,7 +1272,9 @@ function buildPersistedLayer(settings: GoalSettings): Record<string, unknown> {
 	if (settings.stallTimeoutMinutes !== undefined) persisted.stallTimeoutMinutes = settings.stallTimeoutMinutes;
 	if (settings.objectiveMaxChars !== undefined) persisted.objectiveMaxChars = settings.objectiveMaxChars;
 	if (settings.keybindings?.dashboard) {
-		persisted.keybindings = { dashboard: { ...settings.keybindings.dashboard } };
+		persisted.keybindings = { dashboard: { ...settings.keybindings.dashboard }, ...(settings.keybindings.pause ? { pause: settings.keybindings.pause } : {}) };
+	} else if (settings.keybindings?.pause) {
+		persisted.keybindings = { pause: settings.keybindings.pause };
 	}
 	return persisted;
 }
@@ -1303,7 +1324,7 @@ export function effectiveSettingsReport(cwd: string, env: NodeJS.ProcessEnv = pr
 		{ key: "objectiveMaxChars", label: "max objective length (0 = none)", format: () => String(snapshot.value.objectiveMaxChars) },
 		{ key: "networkRecovery", label: "network recovery attempts (0 = unbounded)", format: () => String(snapshot.value.networkRecovery?.maxAttempts ?? 0) },
 		{ key: "networkRecovery", label: "network recovery max delay (ms)", format: () => String(snapshot.value.networkRecovery?.maxDelayMs ?? DEFAULT_NETWORK_RECOVERY_MAX_DELAY_MS) },
-		{ key: "keybindings", label: "dashboard keybindings", format: () => `${snapshot.value.keybindings!.dashboard.toggleExpand}, ${snapshot.value.keybindings!.dashboard.scrollUp}, ${snapshot.value.keybindings!.dashboard.scrollDown}` },
+		{ key: "keybindings", label: "dashboard keybindings", format: () => `${snapshot.value.keybindings!.dashboard.toggleExpand}, ${snapshot.value.keybindings!.dashboard.scrollUp}, ${snapshot.value.keybindings!.dashboard.scrollDown} · pause: ${formatGoalKeybinding(snapshot.value.keybindings!.pause)}` },
 	];
 	for (const row of rows) {
 		const resolved = snapshot.provenance.get(row.key);

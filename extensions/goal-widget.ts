@@ -131,9 +131,12 @@ export function syncTerminalInputPause(core: GoalCore, ctx: ExtensionContext): v
 			// before the dialog could process it (bn-l pattern). Depth counter so
 			// nested goal modals remain guarded.
 			if (core.goalModalDepth > 0) return undefined;
-			const keybindings = loadGoalSettings(goalCwd).keybindings?.dashboard ?? DEFAULT_GOAL_KEYBINDINGS.dashboard;
+			const resolvedKeybindings = loadGoalSettings(goalCwd).keybindings ?? DEFAULT_GOAL_KEYBINDINGS;
+			const keybindings = resolvedKeybindings.dashboard;
+			const pauseKey = resolvedKeybindings.pause;
 			if (isKittyRepeatOrRelease(data)) {
 				const goalShortcut = matchesKey(data, keybindings.toggleExpand) || matchesKey(data, "ctrl+shift+a") ||
+					matchesKey(data, pauseKey) ||
 					(matchesKey(data, "escape") && (core.isDashboardExpanded() || core.state.goal !== null)) ||
 					(core.isDashboardExpanded() && (["up", "down", "pageUp", "pageDown", "home", "end"] as const).some(key => matchesKey(data, key))) ||
 					(!core.isDashboardExpanded() && core.goalWidgetComponentRef.current !== null &&
@@ -155,17 +158,23 @@ export function syncTerminalInputPause(core: GoalCore, ctx: ExtensionContext): v
 				core.toggleDashboardExpanded();
 				return { consume: true };
 			}
-			// Escape on a live goal: pause it, then pass the key back to pi by
-			// returning undefined (not { consume: true }) so pi aborts the running
-			// tool execution / current turn too — Escape must stop the working as
-			// well as flip the state. The abort cascade (agent_end / turn_end call
-			// pauseActiveGoal again) is a no-op because the goal is already paused.
-			// When the goal is already paused this branch is skipped and Escape
-			// falls through to pi, which stops the current turn without any goal
-			// state change.
-			if (matchesKey(data, "escape") && core.state.goal?.status === "active" && core.state.goal.autoContinue) {
+			// Pause key on a live goal. With the default Escape binding we pass the key
+			// back to pi (return undefined, not { consume: true }) so pi aborts the
+			// running tool execution / current turn too — Escape must stop the
+			// working as well as flip the state. The abort cascade (agent_end /
+			// turn_end call pauseActiveGoal again) is a no-op because the goal is
+			// already paused. When the goal is already paused this branch is skipped
+			// and the pause key falls through to pi without any goal state change.
+			// With a non-default pause binding (pi binds nothing to it) we must
+			// abort explicitly via ctx.abort() and consume the key.
+			if (matchesKey(data, pauseKey) && core.state.goal?.status === "active" && core.state.goal.autoContinue) {
+				if (pauseKey === "escape") {
+					core.pauseActiveGoal(ctx);
+					return undefined;
+				}
 				core.pauseActiveGoal(ctx);
-				return undefined;
+				ctx.abort();
+				return { consume: true };
 			}
 
 			// Ctrl+Shift+T — toggle the unified dashboard between compact and
